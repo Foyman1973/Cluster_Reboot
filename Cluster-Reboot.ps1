@@ -121,7 +121,7 @@ if($conn){
             $i=1
             $hostCount = $hostList.Count
             $hostList|ForEach-Object{
-                Write-Progress -Activity "Rebooting Cluster $myCluster" -Status $($_.Name) -PercentComplete (($i/$hostCount)*100)
+                Write-Progress -Activity "Rebooting Cluster $myCluster" -Status "$($_.Name) [ $i of $hostCount ]" -PercentComplete (($i/$hostCount)*100)
                 if($_.ConnectionState -ne "Maintenance"){
                 	$alreadyMaint = $false
                     Write-Host "Placing host " -NoNewline
