@@ -12,11 +12,10 @@
  
  ==============================================================================================
 #>
-
 Clear-Host
 Write-Host ("="*80) -ForegroundColor DarkGreen
 Write-Host ""
-Write-Host $MyInvocation.MyCommand.Name "v1.1.25"
+Write-Host $MyInvocation.MyCommand.Name "v1.1.26"
 Write-Host "Started" $(Get-Date -Format g)
 Write-Host ""
 Write-Host ("="*80) -ForegroundColor DarkGreen
@@ -28,23 +27,27 @@ $cancel = New-Object System.Management.Automation.Host.ChoiceDescription "&Exit"
 $options = [System.Management.Automation.Host.ChoiceDescription[]]($yes,$no)
 $vCenter = Read-Host "vCenter IP or FQDN:"
 $stopwatch = [Diagnostics.StopWatch]::StartNew()
-function Check-PowerCLIv3{
-	$pCLIpresent=$false
-	Get-Module -Name VMware* -ListAvailable | Import-Module -ErrorAction SilentlyContinue
-	Add-PSSnapin VMware.VimAutomation.Core -ErrorAction SilentlyContinue
-	try{$myVersion = Get-PowerCLIVersion;$pCLIpresent=$true}
-	catch{}
-	return $pCLIpresent
+# -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+function Exit-Script{
+    Write-Host "Script Exit Requested, Exiting..."
+    Stop-Transcript
+    exit
 }
-Write-Host "Checking PowerCLI Snap-in..."
-if(!(Check-PowerCLIv3)){Write-Host "No PowerCLI Installed" -ForegroundColor Red;exit}
+# -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+function Get-PowerCLI{
+    $pCLIpresent=$false
+    Get-Module -Name VMware.VimAutomation.Core -ListAvailable | Import-Module -ErrorAction SilentlyContinue
+    try{$pCLIpresent=((Get-Module VMware.VimAutomation.Core).Version.Major -ge 10)}
+    catch{}
+    return $pCLIpresent
+}
+# -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+if(!(Get-PowerCLI)){Write-Host "* * * * No PowerCLI Installed or version too old. * * * *" -ForegroundColor Red;Exit-Script}
 $conn = Connect-VIServer $vCenter -ErrorAction SilentlyContinue
 if($conn){
-
-
     Write-Host "Available Clusters:" -ForegroundColor Yellow
     Write-Host ("="*30) -ForegroundColor DarkGreen
-    $clusterList = Get-Cluster|sort Name
+    $clusterList = Get-Cluster|Sort-Object Name
     $choice = @{}
     for($i=1;$i -le $clusterList.count;$i++){
         Write-Host "  $i ...... $($clusterList[$i-1].Name)"
@@ -69,9 +72,9 @@ if($conn){
     Write-Host ""
     Write-Host "The Following Hosts will be rebooted:" -ForegroundColor Yellow
     Write-Host ("-"*50) -ForegroundColor DarkRed
-    $hostList = Get-Cluster $myCluster|Get-VMHost|?{$_.ConnectionState -match "^(Connected|Maintenance)$"}|sort Name
+    $hostList = Get-Cluster $myCluster|Get-VMHost|Where-Object{$_.ConnectionState -match "^(Connected|Maintenance)$"}|Sort-Object Name
     $connCount = 0;$maintCount = 0
-    $hostList|%{
+    $hostList|ForEach-Object{
         if($_.ConnectionState -eq "Maintenance"){
             $maintCount++
             Write-Host $_.Name "[" -NoNewline;Write-Host $_.ConnectionState -ForegroundColor Yellow -NoNewline;Write-Host "]"
@@ -112,12 +115,12 @@ if($conn){
             if($rebootAll){Write-Host "ALL" -ForegroundColor Yellow -BackgroundColor Black -NoNewline}
             else{
                 Write-Host "ONLINE ONLY" -ForegroundColor Green -NoNewline
-                $hostList = Get-Cluster $myCluster|Get-VMHost|?{$_.ConnectionState -eq "Connected"}|sort Name
+                $hostList = Get-Cluster $myCluster|Get-VMHost|Where-Object{$_.ConnectionState -eq "Connected"}|Sort-Object Name
             }
             Write-Host " hosts in cluster " -noNewLine;Write-Host $myCluster -ForegroundColor Cyan
             $i=1
             $hostCount = $hostList.Count
-            $hostList|%{
+            $hostList|ForEach-Object{
                 Write-Progress -Activity "Rebooting Cluster $myCluster" -Status $($_.Name) -PercentComplete (($i/$hostCount)*100)
                 if($_.ConnectionState -ne "Maintenance"){
                 	$alreadyMaint = $false
@@ -135,26 +138,26 @@ if($conn){
                 if((Get-VMHost $_).ConnectionState -eq "Maintenance"){
                     Write-Host `t"Rebooting Host " $_.Name
                     $result = $_|Restart-VMHost -Confirm:$false
-                    do{sleep -Seconds 10}
+                    do{Start-Sleep -Seconds 10}
                     until( (Get-VMHost $_).ConnectionState -eq "NotResponding")
                     Write-Host `t"Host offline, waiting for return..."
-                    do{sleep -Seconds 10}
+                    do{Start-Sleep -Seconds 10}
                     until((Get-VMHost $_).ConnectionState -ne "NotResponding")
                     
                     if($stateless){
                     	Write-Host `t"Host is responding again, waiting for profiles..."
-	                    do{sleep -Seconds 10}
+	                    do{Start-Sleep -Seconds 10}
 	                    until((Get-VMHost $_).ConnectionState -eq "Connected")
                     }
                     else{
                     	if(!($alreadyMaint)){
-	                    	do{sleep -Seconds 5}
+	                    	do{Start-Sleep -Seconds 5}
 	                    	until((Get-VMHost $_).ConnectionState -eq "Maintenance")
 	                    	Write-Host `t"Exiting Maintenance mode..."
 	                    	$result = $_|Set-VMHost -State Connected
                     	}
                     }
-                    sleep -Seconds 15
+                    Start-Sleep -Seconds 15
                     Write-Host `t"Host Reboot complete." -ForegroundColor Green
                     $i++
                 }
@@ -164,19 +167,8 @@ if($conn){
         }
     	1{Write-Host "Cluster Reboot Aborted." -ForegroundColor Red}
     }
-
-
-
-
-
-
-
-
-
-
 }
 else{write-host "Failed to conntect to $vCenter" -ForegroundColor Red}
-
 $stopwatch.Stop()
 $elapsedTime = [Math]::Round((($stopwatch.ElapsedMilliseconds)/1000)/60,1)
 Write-Host ("="*80) -ForegroundColor DarkGreen
